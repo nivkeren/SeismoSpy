@@ -1,6 +1,6 @@
 <?xml version='1.0' encoding='utf-8'?>
 <q:quakeml xmlns="http://quakeml.org/xmlns/bed/1.2" xmlns:q="http://quakeml.org/xmlns/quakeml/1.2">
-  <eventParameters publicID="smi:local/1bb73b7b-2f8b-46af-bf62-6e62a1c3d312">
+  <eventParameters publicID="smi:local/63b22faa-b2fc-4eec-9347-63cd72e18379">
     <event publicID="smi:org.gfz-potsdam.de/geofon/gfz2018myif">
       <preferredOriginID>smi:org.gfz-potsdam.de/geofon/Origin#201807040148.1530669006.000000</preferredOriginID>
       <preferredMagnitudeID>smi:org.gfz-potsdam.de/geofon/Origin#201807040148.1530669006.000000/netMag/M</preferredMagnitudeID>
