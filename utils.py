@@ -74,6 +74,21 @@ def absolute2relative(points1, points2):
     return dist * np.sin(azim), dist * np.cos(azim)
 
 
+def relative2absolute(lat, lon, x, y):
+    # φ2 = asin( sin φ1 ⋅ cos δ + cos φ1 ⋅ sin δ ⋅ cos θ )
+    # λ2 = λ1 + atan2( sin θ ⋅ sin δ ⋅ cos φ1, cos δ − sin φ1 ⋅ sin φ2 )
+    distance = (x**2 + y**2)**0.5
+    azimuth = np.arctan2(x, y)
+    lat1, lon1 = map(np.radians, (lat, lon))
+    distance /= AVG_EARTH_RADIUS_KM
+    lat2 = np.arcsin(np.sin(lat1) * np.cos(distance) + np.cos(lat1) * np.sin(distance) * np.cos(azimuth))
+    lon2 = lon1 + np.arctan2(np.sin(azimuth) * np.sin(distance) * np.cos(lat1),
+                             np.cos(distance) - np.sin(lat1) * np.sin(lat))
+    # lon = (lon1 - dlon + np.pi) % (2 * np.pi) - np.pi
+    lat2, lon2 = map(np.degrees, (lat2, lon2))
+    return lat2, lon2
+
+
 def conversite(latitudes, longitudes, grid_size=100):
     min_lat = latitudes.min()
     max_lat = latitudes.max()
@@ -175,6 +190,7 @@ def load_waveforms(dir_path='.', min_freq=1, max_freq=10):
     waveforms_filtered = []
     mseed_paths = [os.path.join(dir_path, path) for path in os.listdir(dir_path)
                    if os.path.isfile(os.path.join(dir_path, path)) and path.lower().endswith('.mseed')]
+    mseed_paths.sort()
     for path in mseed_paths:
         print(f"loading mseed file: {path}")
         st = obspy.read(path, format="MSEED")
@@ -232,7 +248,7 @@ def hand_pick(st, inv, freqmin=1, freqmax=10):
 
     for tr_pick in st_filtered:
         tr_pick.stats.location = f"{freqmin}{freqmax}"
-    st_pick = st_filtered + st.cpoy()
+    st_pick = st_filtered + st.copy()
 
     picks = st_pick.snuffle(inventory=inv)
     for mark in picks[1]:
@@ -265,8 +281,8 @@ def event_df(st, inv, event):
         ts = np.nan
         cat_tp = np.nan
         cat_ts = np.nan
-
-        epi_dist, hypo_dist = distance_from_event(event, (lat, lon), elevation, local_depth)
+        epi_dist, hypo_dist = distance_from_event(event, np.array((lat, lon)).reshape((2, -1)),
+                                                  elevation, local_depth)
 
         # catalog picks
         cat_tp, cat_ts = catalog_pick(event, network, station)
@@ -285,6 +301,29 @@ def event_df(st, inv, event):
         df.loc[(station, channel[0: 2]), cols] = lat, lon, elevation, local_depth, sr, hypo_dist, \
                                                  cat_tp, cat_ts, tp_sta, tp, ts
 
+
+def load_location(dir_path, event_id, methods, speeds):
+    X, Y, Z, V = 3, 2, 1, 0
+    results = {}
+    for method in methods:
+        residuals_list = [0] * len(speeds)
+        for j, vp in enumerate(speeds):
+            npy_paths = [os.path.join(dir_path, path) for path in os.listdir(dir_path)
+                         if os.path.isfile(os.path.join(dir_path, path))
+                         and path.lower().endswith(f"{vp}.npy")
+                         and path.startswith(f"{event_id}-{method}")]
+            npy_paths.sort()
+            npy_paths.append(npy_paths.pop(1))
+            residuals_list[j] = np.stack([np.load(path) for path in npy_paths])
+        residuals = np.stack(residuals_list)
+        loc = np.unravel_index(residuals.argmin(), residuals.shape)
+        results[method] = {"mrs": residuals[loc[V], loc[Z], :, :].copy(),
+                           "mrs_min": residuals[loc],
+                           "location": (loc[Y], loc[X]),
+                           "depth": loc[Z] + 1,
+                           "vp": speeds[loc[V]]}
+
+    return results
 
 def plot_map(ax, event_data):
     lon_margin, lat_margin = 0.1, 0.025
