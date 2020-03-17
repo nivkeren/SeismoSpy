@@ -301,7 +301,57 @@ def event_df(st, inv, event):
         df.loc[(station, channel[0: 2]), cols] = lat, lon, elevation, local_depth, sr, hypo_dist, \
                                                  cat_tp, cat_ts, tp_sta, tp, ts
 
+def location(event_id, event_data, wx, wy, delta_x, delta_y, vps=(4.0, ), depths=(5, 6, 7, 8, 9)):
+    pairs = list(itertools.combinations(range(len(event_data)), 2))
+    time_differences = [UTCDateTime(event_data.iloc[p[0]]["tp"]) - UTCDateTime(event_data.iloc[p[1]]["tp"]) for p in pairs]
+    results = {}
+    for p in ("pp", "ps"):
+        results[p] = {"mrs_min": np.inf,
+                      "depth": depths[0]}
+    for vp, depth in itertools.product(vps, depths):
+        mrs = {"pp": np.zeros((wy, wx)),
+               "ps": np.zeros((wy, wx))}
+        for y in range(wy):
+            for x in range(wx):
 
+                gx = x * delta_x
+                gy = y * delta_y
+                tt = [0 for i in range(num_stations)]
+
+                r_sum_pp = 0
+                r_sum_ps = 0
+
+                #calculate S-P residua at this cell(x,y,z) by comparing travel time difference with onset time difference
+                # t0 = tp-ttp = ts-tts -> tp-ttp - (ts-tts) = 0 -> (tp-ts) - (ttp - tts) = 0
+                # tp - ts := t0 + ttp - (t0 + tts) = ttp - tts 
+
+                for s in range(num_stations):      
+                    tt[s] = np.sqrt((event_data.iloc[s]["x"] - gx)**2 
+                                  + (event_data.iloc[s]["y"] - gy)**2 
+                                  + ((event_data.iloc[s]["elevation"] - event_data.iloc[s]["local_depth"]) / 1000 - depth)**2) / vp            
+                    ttp = tt[s]
+                    tts = ttp * 1.73
+                
+                    r_sum_ps += np.abs((tts - ttp) - (UTCDateTime(event_data.iloc[s]["ts"]) - UTCDateTime(event_data.iloc[s]["tp"])))        
+                for ci in range(len(pairs)): 
+                    #CONSTRAINTS (ci): thickness of constraints
+                    #if np.abs((tt[i[ci][0]] - tt[i[ci][1]]) - c[ci]) < 0.1: rSum+=1
+                    #RESIDUA
+                    r_sum_pp += np.abs((tt[pairs[ci][0]] - tt[pairs[ci][1]]) - time_differences[ci])
+                mrs["ps"][y][x] = r_sum_ps
+                mrs["pp"][y][x] = r_sum_pp
+        
+        for p in ("pp", "ps"):
+            np.save(f"{event_id}-{p}-{depth}-{vp}", mrs[p])
+            if mrs[p].min() < results[p]["mrs_min"]:
+                results[p]["mrs"] = mrs[p].copy()
+                results[p]["mrs_min"] = mrs[p].min()
+                results[p]["depth"] = depth
+                results[p]["vp"] = vp
+                results[p]["location"] = (np.unravel_index(mrs[p].argmin(), mrs[p].shape))
+    
+    return results
+        
 def load_location(dir_path, event_id, methods, speeds):
     X, Y, Z, V = 3, 2, 1, 0
     results = {}
@@ -469,8 +519,8 @@ def plot_ml_distance(ax, event_data):
     ax.scatter(event_data["pp_distance"], event_data["pp_magnitude"], label="P-P location")
     ax.scatter(event_data["ps_distance"], event_data["ps_magnitude"], label="P-S location")
 
-    ax.axhline(event_data["pp_magnitude"].mean(), c="C0", ls='-', label="P-P ML")
-    ax.axhline(event_data["ps_magnitude"].mean(), c="C1", ls='-', label="P-S ML")
+    ax.axhline(event_data["pp_magnitude"].mean(), c="C0", ls='-', label=r"P-P $M_L$")
+    ax.axhline(event_data["ps_magnitude"].mean(), c="C1", ls='-', label=r"P-S $M_L$")
 
     ax.set_xlabel("distance from hypocenter [km]")
     ax.set_ylabel("local magnitude")
