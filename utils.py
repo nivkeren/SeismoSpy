@@ -83,7 +83,7 @@ def relative2absolute(lat, lon, x, y):
     distance /= AVG_EARTH_RADIUS_KM
     lat2 = np.arcsin(np.sin(lat1) * np.cos(distance) + np.cos(lat1) * np.sin(distance) * np.cos(azimuth))
     lon2 = lon1 + np.arctan2(np.sin(azimuth) * np.sin(distance) * np.cos(lat1),
-                             np.cos(distance) - np.sin(lat1) * np.sin(lat))
+                             np.cos(distance) - np.sin(lat1) * np.sin(lat2))
     # lon = (lon1 - dlon + np.pi) % (2 * np.pi) - np.pi
     lat2, lon2 = map(np.degrees, (lat2, lon2))
     return lat2, lon2
@@ -97,10 +97,10 @@ def conversite(latitudes, longitudes, grid_size=100):
     max_lon = longitudes.max()
 
     grid_max = absolute2relative((min_lat, min_lon), (max_lat, max_lon))
-    rstations = absolute2relative(np.tile((min_lat, min_lon), (len(latitudes), 1)).T,
-                                  (latitudes, longitudes))
+    relative_location = absolute2relative(np.tile((min_lat, min_lon), (len(latitudes), 1)).T,
+                                          (latitudes, longitudes))
 
-    return rstations, grid_max[0] / grid_size, grid_max[1] / grid_size
+    return relative_location, grid_max[0] / grid_size, grid_max[1] / grid_size
 
 
 def download_inv(client, events_times, networks, stations, channels):
@@ -325,19 +325,18 @@ def load_location(dir_path, event_id, methods, speeds):
 
     return results
 
-def plot_map(ax, event_data):
-    lon_margin, lat_margin = 0.1, 0.025
+
+def plot_map(ax, min_lat, max_lat, min_lon, max_lon, xticks=True, yticks=True):
+    lon_margin, lat_margin = 0.025, 0.025
     ticks_diff = 0.05
-    station_size, location_size = 55, 100
-    label_offset_x, label_offset_y = 0, 0.005
 
     #     projection = ccrs.PlateCarree()
     #     ax = plt.subplot(projection=projection)
 
-    ax.set_extent([event_data["lon"].min() - lon_margin,
-                   event_data["lon"].max() + lon_margin,
-                   event_data["lat"].min() - lat_margin,
-                   event_data["lat"].max() + lat_margin],
+    ax.set_extent([min_lon - lon_margin,
+                   max_lon + lon_margin,
+                   min_lat - lat_margin,
+                   max_lat + lat_margin],
                   crs=ccrs.PlateCarree())
 
     ax.add_feature(cfeature.OCEAN.with_scale('50m'), edgecolor='k', facecolor=(0, 0.85, 1))
@@ -349,18 +348,33 @@ def plot_map(ax, event_data):
 
     ax.grid(True)
     ax.set_xticks(
-        np.arange(event_data["lon"].min().round(1) - lon_margin, event_data["lon"].max().round(1) + lon_margin,
-                  ticks_diff),
+        np.arange(min_lon.round(1) - lon_margin, max_lon.max().round(1) + lon_margin, ticks_diff),
         crs=ccrs.PlateCarree())
     ax.set_yticks(
-        np.arange(event_data["lat"].min().round(1) - lat_margin, event_data["lat"].max().round(1) + lat_margin,
-                  ticks_diff),
+        np.arange(min_lat.round(1) - lat_margin, max_lat.round(1) + lat_margin, ticks_diff),
         crs=ccrs.PlateCarree())
+
     lon_formatter = LongitudeFormatter(zero_direction_label=True)
     lat_formatter = LatitudeFormatter()
     ax.xaxis.set_major_formatter(lon_formatter)
     ax.yaxis.set_major_formatter(lat_formatter)
+    if not xticks:
+        ax.set_xticklabels([])
+    if not yticks:
+        ax.set_yticklabels([])
+    # for tick in ax.get_yticklabels():
+    #     tick.set_rotation(90)
+    #     tick.set_va('center')
+    #     tick.set_text(None)
 
+    return ax
+
+
+def plot_events_map(ax, event_data):
+    station_size, location_size = 55, 100
+    label_offset_x, label_offset_y = 0, 0.005
+
+    ax = plot_map(ax)
     ax.scatter(event_data["lon"], event_data["lat"], marker='^', s=station_size, c='k', zorder=2)
     for station in event_data.iterrows():
         ax.text(station[1]["lon"] + label_offset_x, station[1]["lat"] + label_offset_y, station[0][0])
@@ -371,37 +385,51 @@ def plot_stations_xy(ax, event_data, title="", x_lim_add=5, y_lim_add=5):
     x_min, y_min = -2, -2
     marg_x, marg_y = 0, 0
     station_size = 55
-    label_offset_x, label_offset_y = 0, 0.4
+    label_offset_x, label_offset_y = 0.2, 0.5
 
-    ax.set_xlim(x_min, event_data["x"].max() + x_lim_add)
-
-    ax.set_ylim(y_min, event_data["y"].max() + y_lim_add)
-
-    ax.scatter(event_data["x"], event_data["y"], marker='^', s=station_size, c='k', zorder=2)
-    for station in event_data.iterrows():
-        ax.text(station[1]["x"] + label_offset_x, station[1]["y"] + label_offset_y, station[0][0])
+    ax = plot_stations(ax, event_data, "x", "y", label_offset_x, label_offset_y, 15)
 
     ax.axis('equal')
     ax.grid(True, zorder=1)
     ax.set_xticks(np.arange(-(5 * marg_x), (np.ceil(event_data["x"].max()) // 5 + marg_x + 2) * 5, 5))
     ax.set_yticks(np.arange(-(5 * marg_y), (np.ceil(event_data["y"].max()) // 5 + marg_y + 2) * 5, 5))
+    ax.set_xlim(x_min, event_data["x"].max() + x_lim_add + 2)
+    ax.set_ylim(y_min, event_data["y"].max() + y_lim_add + 2)
     ax.set_xlabel('x')
     ax.set_ylabel('y')
     ax.set_title(title)
+
+    return ax
+
+
+def plot_stations(ax, event_data, x_label, y_label, label_offset_x, label_offset_y, threshold):
+    station_size = 55, 100
+    ax.scatter(event_data[x_label], event_data[y_label], marker='^',
+               s=station_size, c='k', zorder=2, label="station")
+    for station in event_data.iterrows():
+        alignment = "left"
+        label_offset_x = np.abs(label_offset_x)
+        if threshold and station[1][x_label] < threshold:
+            alignment = "right"
+            label_offset_x *= -1
+        ax.annotate(station[0][0], (station[1][x_label], station[1][y_label]),
+                    xytext=(station[1][x_label] + label_offset_x, station[1][y_label] + label_offset_y),
+                    horizontalalignment=alignment)
+    return ax
 
 
 def plot_location(ax, fig, event_data, mrs, wx, wy, delta_x, delta_y, title, percents=(1, 5, 10, 15, 50)):
     location_size = 100
 
     plot_stations_xy(ax, event_data, title=title)
-
     xp = np.linspace(0, wx, wx) * delta_x
     yp = np.linspace(0, wy, wy) * delta_y
     res = ax.pcolor(xp, yp, mrs, cmap=cm.RdBu, vmin=abs(mrs).min(), vmax=abs(mrs).max())
-    cb = fig.colorbar(res, ax=ax)
+    cb = fig.colorbar(res, ax=ax, label='residuals')
 
     min_y, min_x = np.unravel_index(np.argmin(mrs, axis=None), mrs.shape)
-    ax.scatter(min_x * delta_x, min_y * delta_y, color='yellow', marker='*', s=location_size)
+    sc = ax.scatter(min_x * delta_x, min_y * delta_y, color='yellow', marker='*', s=location_size,
+                    label="minimum residual")
 
     xx, yy = np.meshgrid(xp, yp)
     cs = ax.contour(xx, yy, mrs, np.percentile(mrs, percents), colors='w')
@@ -409,7 +437,7 @@ def plot_location(ax, fig, event_data, mrs, wx, wy, delta_x, delta_y, title, per
     # Recast levels to new class
     cs.levels = percents
 
-    # # Label levels with specially formatted floats
+    # Label levels with specially formatted floats
     if plt.rcParams["text.usetex"]:
         fmt = r'%r\%%'
     else:
@@ -417,6 +445,8 @@ def plot_location(ax, fig, event_data, mrs, wx, wy, delta_x, delta_y, title, per
 
     ax.clabel(cs, cs.levels, inline=True, fmt=fmt, fontsize=10)
 
+    # h_contur, _ = cs.legend_elements()
+    # ax.legend([h_contur[0]], ['residual percentage'])
     return ax
 
 
@@ -424,3 +454,26 @@ class nf(float):
     def __repr__(self):
         s = f'{self * 100:2.1f}'
         return f'{self:2.0f}' if s[-1] == '0' else s
+
+
+def magnitude_local(amplitudes, distances):
+    a = np.ones((len(amplitudes))) * 0.018
+    b = np.ones((len(amplitudes))) * 2.17
+    a[distances >= 60] = 0.0038
+    b[distances >= 60] = 3.02
+    ml = np.log10(amplitudes * 1000 * 50) + a * distances + b
+    return ml
+
+
+def plot_ml_distance(ax, event_data):
+    ax.scatter(event_data["pp_distance"], event_data["pp_magnitude"], label="P-P location")
+    ax.scatter(event_data["ps_distance"], event_data["ps_magnitude"], label="P-S location")
+
+    ax.axhline(event_data["pp_magnitude"].mean(), c="C0", ls='-', label="P-P ML")
+    ax.axhline(event_data["ps_magnitude"].mean(), c="C1", ls='-', label="P-S ML")
+
+    ax.set_xlabel("distance from hypocenter [km]")
+    ax.set_ylabel("local magnitude")
+    ax.legend()
+    return ax
+
